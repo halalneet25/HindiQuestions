@@ -2,7 +2,7 @@
 """
 translate_to_hindi_gemini.py — Step 2 of 2
 Translates all 12,771 questions in subjects_fixed.json to Hindi using
-Gemini 1.5 Flash, with RAG context retrieved from the pre-built ChromaDB.
+Gemini 2.0 Flash, with RAG context retrieved from the pre-built ChromaDB.
 
 Prerequisites:
     - Run build_rag_db.py first (builds ./ncert_chroma_db/)
@@ -41,12 +41,12 @@ from tqdm import tqdm
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 GOOGLE_API_KEY   = os.environ.get("GOOGLE_API_KEY")
-MODEL_NAME       = "gemini-1.5-flash"
+MODEL_NAME       = "gemini-2.0-flash"
 EMBEDDING_MODEL  = "models/gemini-embedding-001"
 
 BATCH_SIZE       = 20          # Questions per Gemini call
-MAX_RETRIES      = 3           # Retries per batch before marking as failed
-SLEEP_BETWEEN    = 0.6         # Seconds between API calls (avoids RPM limit)
+MAX_RETRIES      = 5           # Retries per batch before marking as failed
+SLEEP_BETWEEN    = 2.0         # Seconds between API calls (avoids RPM limit)
 
 INPUT_FILE       = "subjects_fixed.json"
 OUTPUT_FILE      = "subjects_hindi.json"
@@ -58,12 +58,11 @@ CHROMA_DB_PATH   = "./ncert_chroma_db"        # Built by build_rag_db.py
 RAG_K            = 4    # Number of chunks to retrieve per batch
 RAG_SCORE_THRESH = 0.4  # Minimum cosine similarity to include a chunk
 
-# Gemini 1.5 Flash pricing (as of 2025, prompts > 128k tokens)
-# Input:  $0.075 / 1M tokens  (≤128k context)
-# Output: $0.30  / 1M tokens
-# Using conservative estimate; actual may be slightly lower for shorter contexts
-COST_INPUT_PER_M  = 0.075
-COST_OUTPUT_PER_M = 0.30
+# Gemini 2.0 Flash pricing
+# Input:  $0.10 / 1M tokens
+# Output: $0.40 / 1M tokens
+COST_INPUT_PER_M  = 0.10
+COST_OUTPUT_PER_M = 0.40
 
 # ─── Garbage Detection ────────────────────────────────────────────────────────
 
@@ -305,9 +304,10 @@ def translate_batch(vector_db, chapter: str | None,
 
     prompt = build_prompt(rag_context, questions_batch)
 
+    client = genai.Client(api_key=GOOGLE_API_KEY)
+
     for attempt in range(MAX_RETRIES):
         try:
-            client = genai.Client(api_key=GOOGLE_API_KEY)
             response = client.models.generate_content(
                 model=MODEL_NAME,
                 contents=prompt,
@@ -367,9 +367,9 @@ def translate_batch(vector_db, chapter: str | None,
 
         except Exception as e:
             err_str = str(e)
-            if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
-                wait = 2 ** (attempt + 3)  # 8s, 16s, 32s
-                print(f"\n  Rate limited (429). Waiting {wait}s...")
+            if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower() or "resource_exhausted" in err_str.lower():
+                wait = 2 ** (attempt + 3) + 5  # 13s, 21s, 37s, 69s, 133s
+                print(f"\n  Rate limited (429). Waiting {wait}s (attempt {attempt + 1}/{MAX_RETRIES})...")
                 time.sleep(wait)
             else:
                 print(f"\n  Error (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
