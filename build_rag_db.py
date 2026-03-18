@@ -44,6 +44,7 @@ OCR_CACHE_DIR   = "./ocr_text_cache"   # Output: raw OCR text per file (debug)
 OCR_DPI         = 300                  # Higher = better OCR accuracy, slower
 CHUNK_SIZE      = 800                  # Characters per chunk
 CHUNK_OVERLAP   = 120                  # Overlap between chunks
+EMBED_BATCH_SIZE = 50                  # Chunks per embedding API call (rate-limit safe)
 
 # Tesseract language config: Hindi + English together
 # 'hin+eng' ensures both scripts are recognised in the same page
@@ -230,14 +231,40 @@ def main():
         google_api_key=GOOGLE_API_KEY
     )
 
-    # Create ChromaDB — this will take a few minutes for 32 PDFs
-    print("\nEmbedding chunks (this takes ~5-10 minutes for all 32 PDFs)...")
-    vector_db = Chroma.from_documents(
-        documents=all_documents,
-        embedding=embeddings,
+    # Create ChromaDB — embed in batches with rate-limit retry
+    print(f"\nEmbedding {len(all_documents)} chunks in batches of {EMBED_BATCH_SIZE}...")
+    print("(This takes ~5-10 minutes for all 32 PDFs with a paid API key)")
+
+    vector_db = Chroma(
         persist_directory=CHROMA_DB_PATH,
+        embedding_function=embeddings,
         collection_metadata={"hnsw:space": "cosine"}
     )
+
+    for batch_start in range(0, len(all_documents), EMBED_BATCH_SIZE):
+        batch = all_documents[batch_start:batch_start + EMBED_BATCH_SIZE]
+        batch_num = batch_start // EMBED_BATCH_SIZE + 1
+        total_batches = (len(all_documents) + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE
+
+        for attempt in range(5):
+            try:
+                vector_db.add_documents(batch)
+                print(f"  Batch {batch_num}/{total_batches} ({len(batch)} chunks) — OK")
+                break
+            except Exception as e:
+                err_str = str(e).lower()
+                if "429" in str(e) or "quota" in err_str or "rate" in err_str or "resource_exhausted" in err_str:
+                    wait = 2 ** (attempt + 3) + 5  # 13s, 21s, 37s, 69s, 133s
+                    print(f"  Batch {batch_num} rate limited. Waiting {wait}s (attempt {attempt + 1}/5)...")
+                    import time
+                    time.sleep(wait)
+                else:
+                    raise
+        else:
+            print(f"  ERROR: Batch {batch_num} failed after 5 retries. Skipping.")
+
+        import time
+        time.sleep(1)  # Brief pause between batches
 
     print(f"\n✓ ChromaDB built at: {CHROMA_DB_PATH}")
     print(f"  Total vectors stored: {vector_db._collection.count()}")
@@ -248,7 +275,7 @@ def main():
         "pdf_count": len(found_pdfs),
         "pdfs_ingested": [p.name for p in found_pdfs],
         "chroma_db_path": CHROMA_DB_PATH,
-        "embedding_model": "models/text-embedding-004",
+        "embedding_model": "models/gemini-embedding-001",
         "chunk_size": CHUNK_SIZE,
         "chunk_overlap": CHUNK_OVERLAP,
     }
