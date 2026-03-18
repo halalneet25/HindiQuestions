@@ -1,0 +1,21 @@
+# ── RAG Ingestion ─────────────────────────────────────────
+pdf2image==1.17.0          # Convert PDF pages to images for OCR
+pytesseract==0.3.13        # Tesseract OCR Python wrapper
+Pillow==10.4.0             # Image handling (dependency of pdf2image)
+
+# ── Vector DB ─────────────────────────────────────────────
+chromadb==0.5.23           # Local vector store
+langchain==0.3.25          # Text splitting utilities
+langchain-google-genai==2.0.10   # Google embeddings via LangChain
+langchain-community==0.3.24      # Chroma LangChain integration
+
+# ── Gemini API ────────────────────────────────────────────
+google-generativeai==0.8.3  # Gemini 1.5 Flash translation calls
+
+# ── Utilities ─────────────────────────────────────────────
+tqdm==4.66.5               # Progress bars
+
+# ── System requirement (install separately) ───────────────
+# sudo apt-get install -y tesseract-ocr tesseract-ocr-hin poppler-utils
+# tesseract-ocr-hin  → Hindi language pack for Tesseract
+# poppler-utils      → Required by pdf2image
